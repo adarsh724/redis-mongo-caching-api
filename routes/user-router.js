@@ -1,5 +1,6 @@
 const express = require('express');
 const User = require('../model/user-schema');
+const redisClient = require("../config/redisClient");
 const ValidationUser = require('../middlewares/userValidation');
 const ValidationUserUpdate = require('../middlewares/userUpdateValidation');
 const bcrypt = require('bcrypt');
@@ -31,12 +32,19 @@ router.post('/create',ValidationUser,async (req,res) => {
 // get all users
 router.get('/',async (req,res) => {
     try {
-        const users = await User.find({});
+        const cacheKey = 'users:all';
+        const cachedUsers = await redisClient.get(cacheKey);
+        if(cachedUsers){
+            return res.status(200).json(JSON.parse(cachedUsers));
+        }
+        const users = await User.find({}).lean();
         if(users.length==0){
             return res.status(404).json({error:"No User found !!"});
         }
+        await redisClient.set(cacheKey, JSON.stringify(users), { EX: 300 });
         res.status(200).json(users);
     } catch (error) {
+        console.error(error.message);
         res.status(500).json({ error: 'Something went wrong' });
     }
 });
@@ -47,10 +55,16 @@ router.get('/',async (req,res) => {
 router.get('/:id',async (req,res) => {
     try {
         const {id} = req.params;
+        const cacheKey = `user:${id}`;
+        const cached = await redisClient.get(cacheKey);
+        if (cached) {
+            return res.json(JSON.parse(cached));
+        }
         const user = await User.findById(id);
         if(!user){
             return res.status(404).json({error: " No such User found !!"});
         }
+        await redisClient.set(cacheKey,JSON.stringify(user),{EX:3600});
         res.status(200).json(user);
     } catch (error) {
         console.error(error.message);
@@ -63,8 +77,13 @@ router.put('/:id',ValidationUserUpdate,async (req,res) => {
         const {id} = req.params;
         const user = await User.findByIdAndUpdate(id,req.body,{ returnDocument: 'after' });
         if (!user) return res.status(404).json({ error: "Not found" });
+        const userResponse = user.toObject();
+        delete userResponse.password;
 
-        res.status(200).json({message:"User updated Successfully",data:user});
+        //  Evict Caches to keep data 
+        await redisClient.del(`user:${id}`);
+        await redisClient.del('users:all');
+        res.status(200).json({message:"User updated Successfully",data:userResponse});
 
     } catch (error) {
         console.error(error.message);
@@ -78,6 +97,8 @@ router.delete('/:id',async (req,res) => {
         const {id} = req.params;
         const user = await User.findByIdAndDelete(id);
         if (!user) return res.status(404).json({ error: "Not found" });
+        await redisClient.del(`user:${id}`);
+        await redisClient.del('users:all');
         res.status(200).json({message: " User Deleted Successfully"});
     } catch (error) {
         console.error(error.message);
