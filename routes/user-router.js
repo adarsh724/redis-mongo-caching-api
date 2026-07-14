@@ -3,7 +3,10 @@ const User = require('../model/user-schema');
 const redisClient = require("../config/redisClient");
 const ValidationUser = require('../middlewares/userValidation');
 const ValidationUserUpdate = require('../middlewares/userUpdateValidation');
+const requireTokenShield = require('../middlewares/tokenShield');
+const accessOwnData = require('../middlewares/isOwnAccess');
 const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
 const router = express.Router();
 
 
@@ -22,7 +25,9 @@ router.post('/create',ValidationUser,async (req,res) => {
             password: hashedPass 
         });
         const userResponse = user.toObject ? user.toObject() : user.get({ plain: true });
-        delete userResponse.password;
+        delete userResponse.password; 
+
+        await redisClient.del('users:all');
         res.status(201).json({message:"User Created Successfully",data: userResponse});
     } catch (error) {
         res.status(500).json({ error: 'Something went wrong' });
@@ -30,7 +35,7 @@ router.post('/create',ValidationUser,async (req,res) => {
 });
 
 // get all users
-router.get('/',async (req,res) => {
+router.get('/',requireTokenShield,async (req,res) => {
     try {
         const cacheKey = 'users:all';
         const cachedUsers = await redisClient.get(cacheKey);
@@ -52,7 +57,7 @@ router.get('/',async (req,res) => {
 
 // get a user by Id
 
-router.get('/:id',async (req,res) => {
+router.get('/:id',requireTokenShield,accessOwnData,async (req,res) => {
     try {
         const {id} = req.params;
         const cacheKey = `user:${id}`;
@@ -72,7 +77,7 @@ router.get('/:id',async (req,res) => {
     }
 });
 
-router.put('/:id',ValidationUserUpdate,async (req,res) => {
+router.put('/:id',requireTokenShield,accessOwnData,ValidationUserUpdate,async (req,res) => {
     try {
         const {id} = req.params;
         const user = await User.findByIdAndUpdate(id,req.body,{ returnDocument: 'after' });
@@ -92,7 +97,7 @@ router.put('/:id',ValidationUserUpdate,async (req,res) => {
 })
 
 
-router.delete('/:id',async (req,res) => {
+router.delete('/:id',requireTokenShield,accessOwnData,async (req,res) => {
     try {
         const {id} = req.params;
         const user = await User.findByIdAndDelete(id);
@@ -102,6 +107,35 @@ router.delete('/:id',async (req,res) => {
         res.status(200).json({message: " User Deleted Successfully"});
     } catch (error) {
         console.error(error.message);
+        res.status(500).json({ error: 'Something went wrong' });
+    }
+});
+
+
+
+router.post('/login',async (req,res) => {
+    try {
+        const {email, password} = req.body;
+        if(!email || !password){
+            return res.status(401).json({ error: "Invalid Username or Password !!" });
+        }
+        const user =await User.findOne({email}).select('+password');
+         if (!user) {
+            return res.status(401).json({ error: "Invalid credentials passed." }); 
+        }
+        const isMatching = await bcrypt.compare(password, user.password);
+        if (!isMatching) {
+            return res.status(401).json({ error: "Invalid credentials passed." });
+        }
+        const userpayload = { username: user.name, userId: user._id };
+        const token = jwt.sign(userpayload, process.env.MY_SECRET_KEY, { expiresIn: '1h' });
+        res.status(200).json({
+            success: true,
+            accessToken: token 
+        });
+
+    } catch (error) {
+         console.error(error.message);
         res.status(500).json({ error: 'Something went wrong' });
     }
 })
