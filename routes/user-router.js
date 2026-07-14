@@ -5,6 +5,7 @@ const ValidationUser = require('../middlewares/userValidation');
 const ValidationUserUpdate = require('../middlewares/userUpdateValidation');
 const requireTokenShield = require('../middlewares/tokenShield');
 const accessOwnData = require('../middlewares/isOwnAccess');
+const requireAdmin = require('../middlewares/requireAdmin');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const router = express.Router();
@@ -35,7 +36,7 @@ router.post('/create',ValidationUser,async (req,res) => {
 });
 
 // get all users
-router.get('/',requireTokenShield,async (req,res) => {
+router.get('/',requireTokenShield,requireAdmin,async (req,res) => {
     try {
         const cacheKey = 'users:all';
         const cachedUsers = await redisClient.get(cacheKey);
@@ -77,24 +78,29 @@ router.get('/:id',requireTokenShield,accessOwnData,async (req,res) => {
     }
 });
 
-router.put('/:id',requireTokenShield,accessOwnData,ValidationUserUpdate,async (req,res) => {
+router.put('/:id', requireTokenShield, accessOwnData, ValidationUserUpdate, async (req,res) => {
     try {
-        const {id} = req.params;
-        const user = await User.findByIdAndUpdate(id,req.body,{ returnDocument: 'after' });
+        const { id } = req.params;
+
+        if ('password' in req.body) {
+            return res.status(400).json({ error: "Password cannot be updated through this route" });
+        }
+
+        const user = await User.findByIdAndUpdate(id, req.body, { returnDocument: 'after', runValidators: true });
         if (!user) return res.status(404).json({ error: "Not found" });
+
         const userResponse = user.toObject();
         delete userResponse.password;
 
-        //  Evict Caches to keep data 
         await redisClient.del(`user:${id}`);
         await redisClient.del('users:all');
-        res.status(200).json({message:"User updated Successfully",data:userResponse});
+        res.status(200).json({message:"User updated Successfully", data:userResponse});
 
     } catch (error) {
         console.error(error.message);
         res.status(500).json({ error: 'Something went wrong' });
     }
-})
+});
 
 
 router.delete('/:id',requireTokenShield,accessOwnData,async (req,res) => {
@@ -127,7 +133,7 @@ router.post('/login',async (req,res) => {
         if (!isMatching) {
             return res.status(401).json({ error: "Invalid credentials passed." });
         }
-        const userpayload = { username: user.name, userId: user._id };
+        const userpayload = { username: user.name, userId: user._id, role: user.role };
         const token = jwt.sign(userpayload, process.env.MY_SECRET_KEY, { expiresIn: '1h' });
         res.status(200).json({
             success: true,
