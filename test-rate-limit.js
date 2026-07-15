@@ -2,7 +2,7 @@ const axios = require('axios');
 
 async function test() {
   const requests = Array.from({ length: 10 }, (_, i) =>
-    axios.post('http://localhost:8000/api/users/login', {
+    axios.post('http://localhost:8000/api/users/create', {
       email: 'test@example.com',
       password: 'wrongpassword'
     }).then(res => ({ i, status: res.status }))
