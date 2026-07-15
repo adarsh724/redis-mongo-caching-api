@@ -6,6 +6,7 @@ const ValidationUserUpdate = require('../middlewares/userUpdateValidation');
 const requireTokenShield = require('../middlewares/tokenShield');
 const accessOwnData = require('../middlewares/isOwnAccess');
 const requireAdmin = require('../middlewares/requireAdmin');
+const tokenBucketMiddleware = require('../middlewares/tokenBucketLimiter');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const router = express.Router();
@@ -119,7 +120,13 @@ router.delete('/:id',requireTokenShield,accessOwnData,async (req,res) => {
 
 
 
-router.post('/login',async (req,res) => {
+router.post('/login',
+    tokenBucketMiddleware({
+    capacity: 5,
+    refillRatePerSecond: 1/12, // 1 token every 12 sec -> 5 per minute steady state
+    keyFn: (req) => `login:${req.body.email || req.ip}`
+  })
+    ,async (req,res) => {
     try {
         const {email, password} = req.body;
         if(!email || !password){
