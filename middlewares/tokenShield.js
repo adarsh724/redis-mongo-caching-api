@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
+const redisClient = require('../config/redisClient');
 
-const requireTokenShield = (req, res, next) => {
+const requireTokenShield = async (req, res, next) => {
     const authHeader = req.headers["authorization"];
     
     // 1. 🔹 Safely check if the header even exists first
@@ -15,6 +16,11 @@ const requireTokenShield = (req, res, next) => {
     }
 
     try {
+        const isBlacklisted = await redisClient.get(`blacklist:${token}`);
+        if (isBlacklisted) {
+            return res.status(401).json({ error: "Access Denied: Token has been revoked. Please log in again." });
+        }
+
         const isVerified = jwt.verify(token, process.env.MY_SECRET_KEY);
         req.user = isVerified;
         next();

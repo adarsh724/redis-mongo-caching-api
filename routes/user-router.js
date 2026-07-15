@@ -154,7 +154,25 @@ router.post('/login',
 })
 
 
+router.post('/logout',requireTokenShield,async (req,res) => {
+    try {
+        const authHeader = req.headers["authorization"];
+        const token = authHeader.split(' ')[1];
+        const decoded = jwt.decode(token);
+        const now = Math.floor(Date.now()/1000);
+        const remainingTTL = decoded.exp-now;
 
+        if(remainingTTL>0){
+            await redisClient.set(`blacklist:${token}`,'true',{EX:remainingTTL});
+        }
+        res.status(200).json({ message: "Logged out successfully" });
+    } catch (error) {
+        console.error(error.message);
+        res.status(500).json({ error: 'Something went wrong' });
+    }
+    
+
+});
 
 
 
