@@ -7,22 +7,25 @@ const requireTokenShield = require("../middlewares/tokenShield");
 const accessOwnData = require("../middlewares/isOwnAccess");
 const requireAdmin = require("../middlewares/requireAdmin");
 const tokenBucketMiddleware = require("../middlewares/tokenBucketLimiter");
+const cacheAsync = require("../utils/cacheAsync");
+const AppError = require("../utils/AppError");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const router = express.Router();
 
 // create a new User
-router.post("/create",
-    tokenBucketMiddleware({
-        capacity: 3,
-        refillRatePerSecond: 1 / 1200, // 1 token every 20 min -> ~3 signups per hour per IP
-        keyFn: (req) => `signup:${req.ip}`
-    }),
-     ValidationUser, async (req, res) => {
-  try {
+router.post( 
+  "/create",
+  tokenBucketMiddleware({
+    capacity: 3,
+    refillRatePerSecond: 1 / 1200, // 1 token every 20 min -> ~3 signups per hour per IP
+    keyFn: (req) => `signup:${req.ip}`,
+  }),
+  ValidationUser,
+  cacheAsync(async (req, res) => {
     const existingUser = await User.findOne({ email: req.body.email });
     if (existingUser) {
-      return res.status(400).json({ error: "User already Exists" });
+      throw new AppError("User already Exists", 400);
     }
 
     const hashedPass = await bcrypt.hash(req.body.password, 10);
@@ -39,15 +42,11 @@ router.post("/create",
     res
       .status(201)
       .json({ message: "User Created Successfully", data: userResponse });
-  } catch (error) {
-    console.error('CREATE USER ERROR:', error);
-    res.status(500).json({ error: "Something went wrong" });
-  }
-});
+  }),
+);
 
 // get all users
-router.get("/", requireTokenShield, requireAdmin, async (req, res) => {
-  try {
+router.get("/", requireTokenShield, requireAdmin, cacheAsync(async (req, res) => {
     const cacheKey = "users:all";
     const cachedUsers = await redisClient.get(cacheKey);
     if (cachedUsers) {
@@ -55,20 +54,16 @@ router.get("/", requireTokenShield, requireAdmin, async (req, res) => {
     }
     const users = await User.find({}).lean();
     if (users.length == 0) {
-      return res.status(404).json({ error: "No User found !!" });
+      throw new AppError("No User Found", 404);
     }
     await redisClient.set(cacheKey, JSON.stringify(users), { EX: 300 });
     res.status(200).json(users);
-  } catch (error) {
-    console.error(error.message);
-    res.status(500).json({ error: "Something went wrong" });
-  }
-});
+   
+}));
 
 // get a user by Id
 
-router.get("/:id", requireTokenShield, accessOwnData, async (req, res) => {
-  try {
+router.get("/:id", requireTokenShield, accessOwnData, cacheAsync(async (req, res) => {
     const { id } = req.params;
     const cacheKey = `user:${id}`;
     const cached = await redisClient.get(cacheKey);
@@ -77,36 +72,31 @@ router.get("/:id", requireTokenShield, accessOwnData, async (req, res) => {
     }
     const user = await User.findById(id);
     if (!user) {
-      return res.status(404).json({ error: " No such User found !!" });
+      throw new AppError("No User Found", 404);
     }
     await redisClient.set(cacheKey, JSON.stringify(user), { EX: 3600 });
     res.status(200).json(user);
-  } catch (error) {
-    console.error(error.message);
-    res.status(500).json({ error: "Something went wrong" });
-  }
-});
+  
+}));
 
 router.put(
   "/:id",
   requireTokenShield,
   accessOwnData,
   ValidationUserUpdate,
-  async (req, res) => {
-    try {
+  cacheAsync(async (req, res) => {
+    
       const { id } = req.params;
 
       if ("password" in req.body) {
-        return res
-          .status(400)
-          .json({ error: "Password cannot be updated through this route" });
+        throw new AppError("Password Cannot be Updated through this route !!", 400);
       }
 
       const user = await User.findByIdAndUpdate(id, req.body, {
         returnDocument: "after",
         runValidators: true,
       });
-      if (!user) return res.status(404).json({ error: "Not found" });
+      if (!user) throw new AppError("No User Found", 404);
 
       const userResponse = user.toObject();
       delete userResponse.password;
@@ -116,26 +106,19 @@ router.put(
       res
         .status(200)
         .json({ message: "User updated Successfully", data: userResponse });
-    } catch (error) {
-      console.error(error.message);
-      res.status(500).json({ error: "Something went wrong" });
-    }
   },
-);
+));
 
-router.delete("/:id", requireTokenShield, accessOwnData, async (req, res) => {
-  try {
+router.delete("/:id", requireTokenShield, accessOwnData, cacheAsync(async (req, res) => {
+  
     const { id } = req.params;
     const user = await User.findByIdAndDelete(id);
-    if (!user) return res.status(404).json({ error: "Not found" });
+    if (!user) throw new AppError("No User Found", 404);
     await redisClient.del(`user:${id}`);
     await redisClient.del("users:all");
     res.status(200).json({ message: " User Deleted Successfully" });
-  } catch (error) {
-    console.error(error.message);
-    res.status(500).json({ error: "Something went wrong" });
-  }
-});
+  
+}));
 
 router.post(
   "/login",
@@ -144,21 +127,19 @@ router.post(
     refillRatePerSecond: 1 / 12, // 1 token every 12 sec -> 5 per minute steady state
     keyFn: (req) => `login:${req.body.email || req.ip}`,
   }),
-  async (req, res) => {
-    try {
+  cacheAsync(async (req, res) => {
+    
       const { email, password } = req.body;
       if (!email || !password) {
-        return res
-          .status(401)
-          .json({ error: "Invalid Username or Password !!" });
+        throw new AppError("Invalid Username or Password !!", 401);
       }
       const user = await User.findOne({ email }).select("+password");
       if (!user) {
-        return res.status(401).json({ error: "Invalid credentials passed." });
+        throw new AppError("Invalid Credentials Passed !!", 401);
       }
       const isMatching = await bcrypt.compare(password, user.password);
       if (!isMatching) {
-        return res.status(401).json({ error: "Invalid credentials passed." });
+        throw new AppError("Invalid Credentials Passed !!", 401);
       }
       const userpayload = {
         username: user.name,
@@ -182,15 +163,12 @@ router.post(
         accessToken: token,
         refreshToken: refreshToken,
       });
-    } catch (error) {
-      console.error(error.message);
-      res.status(500).json({ error: "Something went wrong" });
-    }
-  },
-);
+    
+  }
+));
 
-router.post("/logout", requireTokenShield, async (req, res) => {
-  try {
+router.post("/logout", requireTokenShield, cacheAsync(async (req, res) => {
+  
     const authHeader = req.headers["authorization"];
     const token = authHeader.split(" ")[1];
     const decoded = jwt.decode(token);
@@ -202,17 +180,14 @@ router.post("/logout", requireTokenShield, async (req, res) => {
     }
     await redisClient.del(`refresh:${decoded.userId}`);
     res.status(200).json({ message: "Logged out successfully" });
-  } catch (error) {
-    console.error(error.message);
-    res.status(500).json({ error: "Something went wrong" });
-  }
-});
+  
+}));
 
-router.post("/refresh", async (req, res) => {
-  try {
+router.post("/refresh", cacheAsync(async (req, res) => {
+  
     const { refreshToken } = req.body;
     if (!refreshToken) {
-      return res.status(401).json({ error: "Refresh token required" });
+      throw new AppError("Refresh Token Expired !!", 401);
     }
     let decoded;
     try {
@@ -224,12 +199,12 @@ router.post("/refresh", async (req, res) => {
     }
     const storedToken = await redisClient.get(`refresh:${decoded.userId}`);
     if (storedToken !== refreshToken) {
-      return res.status(403).json({ error: "Refresh token has been revoked" });
+      throw new AppError("Refresh Token has been Revoked !!", 403);
     }
 
     const user = await User.findById(decoded.userId);
     if (!user) {
-      return res.status(404).json({ error: "User not found" });
+      throw new AppError("User Not Found  !!", 404);
     }
 
     const userpayload = {
@@ -242,10 +217,7 @@ router.post("/refresh", async (req, res) => {
     });
 
     res.status(200).json({ accessToken: newAccessToken });
-  } catch (error) {
-    console.error(error.message);
-    res.status(500).json({ error: "Something went wrong" });
-  }
-});
+  
+}));
 
 module.exports = router;

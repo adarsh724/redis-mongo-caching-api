@@ -1,11 +1,13 @@
 const express = require("express");
 const redisClient = require("../config/redisClient");
 const Product = require("../model/product-schema");
+const requireTokenShield = require('../middlewares/tokenShield');
+const requireAdmin = require('../middlewares/requireAdmin');
 const router = express.Router();
 
 
 // routes/products.js
-router.post('/products', async (req, res) => {
+router.post('/products', requireTokenShield,requireAdmin,async (req, res) => {
   try {
     const { name, description, category, price, stock } = req.body;
 
@@ -34,7 +36,7 @@ for await (const key of redisClient.scanIterator({ MATCH: 'products:*' })) {
 if (keysToDelete.length > 0) {
   await redisClient.del(keysToDelete);
 }
-
+ 
     res.status(201).json(product);
   } catch (err) {
     console.error(err);
@@ -42,7 +44,7 @@ if (keysToDelete.length > 0) {
   }
 });
 
-router.get("/products/:id", async (req, res) => {
+router.get("/products/:id", requireTokenShield,async (req, res) => {
   const { id } = req.params;
   const cacheKey = `product:${id}`;
   try {
@@ -65,7 +67,7 @@ router.get("/products/:id", async (req, res) => {
   }
 });
 
-router.put("/products/:id", async (req, res) => {
+router.put("/products/:id",requireTokenShield, requireAdmin,async (req, res) => {
   const { id } = req.params;
   try {
     const updated = await Product.findByIdAndUpdate(id, req.body, { returnDocument: 'after' }).lean();
@@ -79,7 +81,7 @@ router.put("/products/:id", async (req, res) => {
   }
 });
 
-router.delete('/products/:id', async (req, res) => {
+router.delete('/products/:id',requireTokenShield, requireAdmin,async (req, res) => {
   const { id } = req.params;
 
   const deleted = await Product.findByIdAndDelete(id);
@@ -104,7 +106,7 @@ router.delete('/products/:id', async (req, res) => {
   res.status(204).send();
 });
 
-router.get("/products", async (req, res) => {
+router.get("/products",requireTokenShield, async (req, res) => {
   try {
     const { category = "all", page = 1, limit = 20 } = req.query;
     const cacheKey = `products:${category}:page:${page}:limit:${limit}`;
