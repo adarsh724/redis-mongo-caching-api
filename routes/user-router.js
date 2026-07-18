@@ -1,16 +1,24 @@
 const express = require("express");
 const User = require("../model/user-schema");
 const redisClient = require("../config/redisClient");
+
+
 const ValidationUser = require("../middlewares/userValidation");
 const ValidationUserUpdate = require("../middlewares/userUpdateValidation");
 const requireTokenShield = require("../middlewares/tokenShield");
 const accessOwnData = require("../middlewares/isOwnAccess");
 const requireAdmin = require("../middlewares/requireAdmin");
 const tokenBucketMiddleware = require("../middlewares/tokenBucketLimiter");
+
+
 const cacheAsync = require("../utils/cacheAsync");
 const AppError = require("../utils/AppError");
+
+
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
+
+
 const router = express.Router();
 
 // create a new User
@@ -45,6 +53,10 @@ router.post(
   }),
 );
 
+
+
+
+
 // get all users
 router.get("/", requireTokenShield, requireAdmin, cacheAsync(async (req, res) => {
     const cacheKey = "users:all";
@@ -60,6 +72,10 @@ router.get("/", requireTokenShield, requireAdmin, cacheAsync(async (req, res) =>
     res.status(200).json(users);
    
 }));
+
+
+
+
 
 // get a user by Id
 
@@ -78,6 +94,10 @@ router.get("/:id", requireTokenShield, accessOwnData, cacheAsync(async (req, res
     res.status(200).json(user);
   
 }));
+
+
+
+
 
 router.put(
   "/:id",
@@ -109,6 +129,11 @@ router.put(
   },
 ));
 
+
+
+
+
+
 router.delete("/:id", requireTokenShield, accessOwnData, cacheAsync(async (req, res) => {
   
     const { id } = req.params;
@@ -119,6 +144,9 @@ router.delete("/:id", requireTokenShield, accessOwnData, cacheAsync(async (req, 
     res.status(200).json({ message: " User Deleted Successfully" });
   
 }));
+
+
+
 
 router.post(
   "/login",
@@ -167,6 +195,12 @@ router.post(
   }
 ));
 
+
+
+
+
+
+
 router.post("/logout", requireTokenShield, cacheAsync(async (req, res) => {
   
     const authHeader = req.headers["authorization"];
@@ -182,6 +216,11 @@ router.post("/logout", requireTokenShield, cacheAsync(async (req, res) => {
     res.status(200).json({ message: "Logged out successfully" });
   
 }));
+
+
+
+
+
 
 router.post("/refresh", cacheAsync(async (req, res) => {
   

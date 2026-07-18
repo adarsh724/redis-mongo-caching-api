@@ -14,6 +14,7 @@ const productSchema = new mongoose.Schema({
   category: {
     type: String,
     required: true,
+    lowercase:true,
     index: true // helps the category filter query in the list endpoint
   },
   price: {
@@ -30,5 +31,7 @@ const productSchema = new mongoose.Schema({
 }, {
   timestamps: true // adds createdAt / updatedAt automatically
 });
+
+productSchema.index({ name: 'text' });
 
 module.exports = mongoose.model('Product', productSchema);
